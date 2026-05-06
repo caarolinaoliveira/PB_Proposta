@@ -1,0 +1,10 @@
+appsettings.Development.json
+appsettings.Production.json
+appsettings.json
+bin/
+obj/
+.vs/
+*.log
+*.dll
+*.exe
+*.cache
