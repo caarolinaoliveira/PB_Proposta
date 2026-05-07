@@ -18,18 +18,21 @@ namespace PB.Proposta.Infrastructure.Messaging
         private readonly ILogger<RabbitMQConsumer> _logger;
         private readonly IConnection _connection;
         private IModel? _channel;
+        private readonly AsyncCircuitBreakerPolicy _circuitBreaker;
 
         public RabbitMQConsumer(
             IServiceScopeFactory scopeFactory,
             ILogger<RabbitMQConsumer> logger,
-            IConnection connection)
+            IConnection connection,
+            AsyncCircuitBreakerPolicy circuitBreaker)
         {
             _scopeFactory = scopeFactory;
             _logger = logger;
             _connection = connection;
+            _circuitBreaker = circuitBreaker;
         }
 
-        protected override Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _channel = _connection.CreateModel();
 
@@ -63,6 +66,13 @@ namespace PB.Proposta.Infrastructure.Messaging
 
             consumer.Received += async (sender, ea) =>
             {
+                if (_circuitBreaker.CircuitState == CircuitState.Open)
+                {
+                    _logger.LogWarning("[CONSUMER] Circuito aberto — reenfileirando mensagem.");
+                    _channel!.BasicNack(ea.DeliveryTag, false, requeue: true);
+                    return;
+                }
+                
                 var json = Encoding.UTF8.GetString(ea.Body.ToArray());
                 var tentativas = 0;
 
@@ -74,8 +84,7 @@ namespace PB.Proposta.Infrastructure.Messaging
 
                 try
                 {
-                    var evento = JsonSerializer.Deserialize<ClienteCadastradoEvent>(json,
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    var evento = JsonSerializer.Deserialize<ClienteCadastradoEvent>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                     if (evento is null)
                     {
@@ -122,15 +131,11 @@ namespace PB.Proposta.Infrastructure.Messaging
                     _channel.BasicAck(ea.DeliveryTag, false);  
                 }
             };
-
-            _channel.BasicConsume(
-                queue: "cliente.cadastrado",
-                autoAck: false, 
-                consumer: consumer);
-
+            
+            _channel.BasicConsume("cliente.cadastrado", autoAck: false, consumer: consumer);
             _logger.LogInformation("[CONSUMER] Aguardando mensagens na fila cliente.cadastrado...");
 
-            return Task.CompletedTask;
+            await Task.Delay(Timeout.Infinite, stoppingToken);
         }
 
         public override void Dispose()
