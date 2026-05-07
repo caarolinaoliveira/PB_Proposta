@@ -7,6 +7,8 @@ using PB.Proposta.Infrastructure.Context;
 using PB.Proposta.Infrastructure.Messaging;
 using PB.Proposta.Infrastructure.Repository;
 using PB.Proposta.Infrastructure.Services;
+using Polly.CircuitBreaker;
+using Polly;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -34,6 +36,25 @@ builder.Services.AddScoped<IPropostaRepository, PropostaRepository>();
 builder.Services.AddScoped<IPropostaService, PropostaService>();
 builder.Services.AddScoped<IMessagePublisher, RabbitMQPublisher>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+
+builder.Services.AddSingleton<AsyncCircuitBreakerPolicy>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger<PropostaService>>();
+
+    return Policy
+        .Handle<Exception>()
+        .CircuitBreakerAsync(
+            exceptionsAllowedBeforeBreaking: 3,
+            durationOfBreak: TimeSpan.FromSeconds(30),
+            onBreak: (ex, duration) =>
+                logger.LogError("[CIRCUIT BREAKER] Aberto por {Segundos}s. Erro: {Msg}",
+                    duration.TotalSeconds, ex.Message),
+            onReset: () =>
+                logger.LogInformation("[CIRCUIT BREAKER] Fechado — retomando"),
+            onHalfOpen: () =>
+                logger.LogInformation("[CIRCUIT BREAKER] Half-open — testando")
+        );
+});
 
 builder.Services.AddHostedService<RabbitMQConsumer>();
 

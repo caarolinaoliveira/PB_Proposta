@@ -6,6 +6,7 @@ using PB.Proposta.Domain.Interfaces;
 using PB.Proposta.Domain.Exceptions;
 using Polly;
 using Polly.CircuitBreaker;
+using Microsoft.Extensions.Logging;
 
 namespace PB.Proposta.Application.Services
 {
@@ -16,18 +17,9 @@ namespace PB.Proposta.Application.Services
         private readonly IPropostaRepository _propostaRepository;
         private readonly IMessagePublisher _messagePublisher;
         private readonly IEmailService _emailService;
-        private static readonly AsyncCircuitBreakerPolicy _circuitBreaker = Policy
-            .Handle<Exception>()
-            .CircuitBreakerAsync(
-                exceptionsAllowedBeforeBreaking: 3,
-                durationOfBreak: TimeSpan.FromSeconds(30),
-                onBreak: (ex, duration) =>
-                    Console.WriteLine($"[CIRCUIT BREAKER] Aberto por {duration.TotalSeconds}s"),
-                onReset: () =>
-                    Console.WriteLine("[CIRCUIT BREAKER] Fechado — retomando operação"),
-                onHalfOpen: () =>
-                    Console.WriteLine("[CIRCUIT BREAKER] Half-open — testando")
-            );
+        private readonly AsyncCircuitBreakerPolicy _circuitBreaker;
+        private readonly ILogger<PropostaService> _logger;
+
 
         #endregion 
 
@@ -36,27 +28,35 @@ namespace PB.Proposta.Application.Services
         public PropostaService(
             IPropostaRepository propostaRepository,
             IMessagePublisher messagePublisher,
-            IEmailService emailService)
+            IEmailService emailService,
+            AsyncCircuitBreakerPolicy circuitBreaker,
+            ILogger<PropostaService> logger)
         {
             _propostaRepository = propostaRepository;
             _messagePublisher = messagePublisher;
             _emailService = emailService;
+            _circuitBreaker = circuitBreaker;
+            _logger = logger;
         }
 
         #endregion
         #region Métodos Públicos
         public async Task ProcessarAsync(ClienteCadastradoEvent evento)
         {
+            _logger.LogInformation("Processando evento ClienteCadastradoEvent para ClienteId: {ClienteId}", evento.ClienteId);
+
             var propostaExistente = await _propostaRepository
                 .ObterPorClienteIdAsync(evento.ClienteId);
 
             if (propostaExistente != null)
-                return;
+                throw new InvalidOperationException("Proposta já existe para este cliente.");
 
             var score = GerarScore();
             var proposta = new PropostaEntity(evento.ClienteId, score);
 
             await _propostaRepository.AdicionarAsync(proposta);
+
+            _logger.LogInformation("[PROPOSTA] Score {Score} | Aprovada: {Aprovada} | ClienteId: {Id}",score, proposta.IsAprovada(), evento.ClienteId);
 
             if (!proposta.IsAprovada())
             {
@@ -81,8 +81,9 @@ namespace PB.Proposta.Application.Services
                 QuantidadeCartoes = proposta.QuantidadeCartoes,
                 OcorridoEm = DateTime.UtcNow
             };
-
-            await _circuitBreaker.ExecuteAsync(async () => await _messagePublisher.PublicarAsync(creditoAprovado, "credito.aprovado"));
+            await _circuitBreaker.ExecuteAsync(() => _messagePublisher.PublicarAsync(creditoAprovado, "credito.aprovado"));
+            
+            _logger.LogInformation("[PROPOSTA] Evento publicado | ClienteId: {Id}", evento.ClienteId);
 
         }
 
