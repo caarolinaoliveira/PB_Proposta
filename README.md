@@ -85,8 +85,10 @@ No arquivo `PB.Proposta/appsettings.json`, configure as credenciais de acordo co
 
 ```bash
 cd PB.Proposta
-dotnet ef migrations add InitialCreate --project PB.Proposta.Infrastructure --startup-project .
-dotnet ef database update --project PB.Proposta.Infrastructure --startup-project .
+
+dotnet ef migrations add InicialCreate --project PB.Proposta.Infrastructure  --startup-project PB.Proposta.Presentation --context PropostaDbContext
+ 
+dotnet ef database update --project PB.Proposta.Infrastructure --startup-project PB.Proposta.Presentation --context PBPropostaDbContext
 ```
 
 > A migration também é aplicada automaticamente na inicialização via `MigrateAsync()` 
