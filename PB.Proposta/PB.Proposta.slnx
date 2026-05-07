@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/Testes/">
+    <Project Path="Testes/PB.Proposta.Application.Tests/PB.Proposta.Application.Tests.csproj" />
+  </Folder>
+  <Project Path="PB.Proposta.Application/PB.Proposta.Application.csproj" />
+  <Project Path="PB.Proposta.Domain/PB.Proposta.Domain.csproj" />
+  <Project Path="PB.Proposta.Infrastructure/PB.Proposta.Infrastructure.csproj" />
+  <Project Path="PB.Proposta.Presentation/PB.Proposta.Presentation.csproj" />
+</Solution>
