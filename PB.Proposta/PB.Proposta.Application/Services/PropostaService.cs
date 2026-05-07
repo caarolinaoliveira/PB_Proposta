@@ -4,6 +4,8 @@ using PB.Proposta.Application.Interfaces;
 using PB.Proposta.Domain.Entities;
 using PB.Proposta.Domain.Interfaces;
 using PB.Proposta.Domain.Exceptions;
+using Polly;
+using Polly.CircuitBreaker;
 
 namespace PB.Proposta.Application.Services
 {
@@ -14,6 +16,18 @@ namespace PB.Proposta.Application.Services
         private readonly IPropostaRepository _propostaRepository;
         private readonly IMessagePublisher _messagePublisher;
         private readonly IEmailService _emailService;
+        private static readonly AsyncCircuitBreakerPolicy _circuitBreaker = Policy
+            .Handle<Exception>()
+            .CircuitBreakerAsync(
+                exceptionsAllowedBeforeBreaking: 3,
+                durationOfBreak: TimeSpan.FromSeconds(30),
+                onBreak: (ex, duration) =>
+                    Console.WriteLine($"[CIRCUIT BREAKER] Aberto por {duration.TotalSeconds}s"),
+                onReset: () =>
+                    Console.WriteLine("[CIRCUIT BREAKER] Fechado — retomando operação"),
+                onHalfOpen: () =>
+                    Console.WriteLine("[CIRCUIT BREAKER] Half-open — testando")
+            );
 
         #endregion 
 
@@ -68,7 +82,8 @@ namespace PB.Proposta.Application.Services
                 OcorridoEm = DateTime.UtcNow
             };
 
-            await _messagePublisher.PublicarAsync(creditoAprovado, "credito.aprovado");
+            await _circuitBreaker.ExecuteAsync(async () => await _messagePublisher.PublicarAsync(creditoAprovado, "credito.aprovado"));
+
         }
 
         public async Task<PropostaResponse> ObterPropostaPorIdCliente (Guid id)
