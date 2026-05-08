@@ -4,9 +4,11 @@ using PB.Proposta.Application.Response;
 using PB.Proposta.Application.Events;
 using PB.Proposta.Domain.Interfaces;
 using PB.Proposta.Domain.Entities;
-using PB.Proposta.Domain.Exceptions; 
+using PB.Proposta.Domain.Exceptions;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
+using Polly;
 using Xunit;
 
 namespace PB.Proposta.Application.Tests;
@@ -23,7 +25,23 @@ public class PropostaServiceTests
         _repositoryMock = new Mock<IPropostaRepository>();
         _publisherMock = new Mock<IMessagePublisher>();
         _emailServiceMock = new Mock<IEmailService>();
-        _service = new PropostaService(_repositoryMock.Object, _publisherMock.Object, _emailServiceMock.Object);
+
+        var circuitBreaker = Policy
+            .Handle<Exception>()
+            .CircuitBreakerAsync(
+                exceptionsAllowedBeforeBreaking: 999,
+                durationOfBreak: TimeSpan.FromSeconds(1)
+            );
+
+        var logger = new Mock<ILogger<PropostaService>>().Object;
+
+        _service = new PropostaService(
+            _repositoryMock.Object,
+            _publisherMock.Object,
+            _emailServiceMock.Object,
+            circuitBreaker,
+            logger
+        );
     }
 
     private ClienteCadastradoEvent CriarEventoPadrao() => new()
@@ -38,7 +56,7 @@ public class PropostaServiceTests
     };
 
     [Fact]
-    public async Task ProcessarAsync_ClienteJaProcessado_DeveIgnorar()
+    public async Task ProcessarAsync_ClienteJaProcessado_DeveLancarInvalidOperationException()
     {
         // Arrange
         var evento = CriarEventoPadrao();
@@ -48,13 +66,11 @@ public class PropostaServiceTests
             .ReturnsAsync(new PropostaEntity(evento.ClienteId, 500));
 
         // Act
-        await _service.ProcessarAsync(evento);
+        Func<Task> act = async () => await _service.ProcessarAsync(evento);
 
         // Assert
-        _repositoryMock.Verify(r => r.AdicionarAsync(It.IsAny<PropostaEntity>()), Times.Never);
-        _publisherMock.Verify(p => p.PublicarAsync(It.IsAny<CreditoAprovadoEvent>(), It.IsAny<string>()), Times.Never);
-        _emailServiceMock.Verify(e => e.EnviarPropostaAprovadaAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<decimal>(), It.IsAny<int>()), Times.Never);
-        _emailServiceMock.Verify(e => e.EnviarPropostaNegadaAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Proposta já existe para este cliente.");
     }
 
     [Fact]
